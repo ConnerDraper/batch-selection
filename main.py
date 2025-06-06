@@ -32,7 +32,7 @@ def main():
     # argument parser
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', default=None, type=str, help='Indicate the config file used for the training.')
-    parser.add_argument('--seed', default=None, type=int, help='Fix the random seed for reproduction. Default is None(random seed).')
+    # parser.add_argument('--seed', default=None, type=int, help='Fix the random seed for reproduction. Default is None(random seed).')
     parser.add_argument('--output_dir', default=None, type=str, help='Output directory that saves everything.')
     parser.add_argument('--log_file', default=None, type=str, help='Logger file name.')
     # notes
@@ -49,11 +49,9 @@ def main():
         f.close()
     print('=====> Config file loaded.')
 
-    if args.seed is None:
-        args.seed = secrets.randbelow(5000) 
+    if not config["seed"]:
+        config["seed"] = secrets.randbelow(5000)
 
-    if args.seed is not None:
-        config["seed"] = args.seed
     if args.log_file is not None:
         config['log_file'] = args.log_file
     
