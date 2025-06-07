@@ -276,3 +276,9 @@ def CIFAR100_LT(config, logger):
         'test_loader': test_loader,
         'num_train_samples': len(dst_train)
     }
+
+def CIFAR100_half(config, logger):
+    raise NotImplementedError("CIFAR100_half has not been implemented.")
+
+def CIFAR10_half(config, logger):
+    raise NotImplementedError("CIFAR10_half has not been implemented.")
