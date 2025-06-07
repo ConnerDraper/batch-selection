@@ -1,8 +1,11 @@
 output_dir: null
-
-method: Uniform
+seed: 42
+methods:
+  - DivBS
+  - Full
+  - Uniform
 method_opt:
-  # epoch_selection: True
+  epoch_selection: False
   iter_selection: True
   num_epochs_per_selection: 1
   ratio: 0.1
@@ -10,6 +13,7 @@ method_opt:
   ratio_scheduler: constant
   warmup_epochs: 0
   replace: False
+  reduce_dim: 4
 
 dataset:
   name: TinyImageNet
@@ -17,7 +21,7 @@ dataset:
 
 networks:
   type: ResNet
-  params: 
+  params:
     m_type: 'resnet18'
     num_classes: 200
     pretrained: False
@@ -36,4 +40,3 @@ training_opt:
   scheduler_params: {endlr: 0.02, gamma: 0.1, step_size: 35, milestones: [120, 160]}
 logger_opt:
   print_iter: 100
-
