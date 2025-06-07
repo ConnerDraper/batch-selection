@@ -55,83 +55,82 @@ def main():
     if args.log_file is not None:
         config['log_file'] = args.log_file
     
+    methods_list = config.get('methods') if 'methods' in config else [config['method']]
+
     if args.output_dir is None:
-        args.output_dir = './exp/'
-        # dataset
-        args.output_dir = os.path.join(args.output_dir, config['dataset']['name'])
-        # method
-        args.output_dir = args.output_dir + '_' + config['method']
-        # model
-        args.output_dir = args.output_dir + '_' + config['networks']['type'] + '-' + config['networks']['params']['m_type']
-        # bs
-        args.output_dir = args.output_dir + '_bs' + str(config['training_opt']['batch_size'])
-        # epochs
-        args.output_dir = args.output_dir + '_ep' + str(config['training_opt']['num_epochs'])
-        # lr
-        args.output_dir = args.output_dir + '_lr' + str(config['training_opt']['optim_params']['lr'])
-        # optimizer
-        args.output_dir = args.output_dir + '_' + config['training_opt']['optimizer']
-        # scheduler
-        args.output_dir = args.output_dir + '_' + config['training_opt']['scheduler']
-        # seed
-        args.output_dir = args.output_dir + '_seed' + str(config['seed'])
-        # ratio
-        if 'method_opt' in config:
-            if 'ratio' in config['method_opt']:
-                args.output_dir = args.output_dir + '_r' + str(config['method_opt']['ratio'])
-        # notes
-        if args.notes is not None:
-            args.output_dir = args.output_dir + '_' + args.notes
-        
-
-    # args.output_dir = os.path.join(args.output_dir, get_date()+ '_' + random_str(6))
-    args.output_dir = os.path.join(args.output_dir, get_date())
-
-    config['output_dir'] = args.output_dir
-    os.makedirs(args.output_dir, exist_ok=True)
-
-    # wandb_not_upload
-    if args.wandb_not_upload:
-        os.environ["WANDB_MODE"] = "dryrun"
+        base_output_dir = './exp/'
     else:
-        os.environ["WANDB_MODE"] = "run"
-    
-    if args.log_file is None:
-        logger = custom_logger(args.output_dir)
-    else:
-        logger = custom_logger(args.output_dir, args.log_file)
+        base_output_dir = args.output_dir
 
-    logger.info('========================= Start Main =========================')
+    base_output_dir = os.path.join(base_output_dir, config['dataset']['name'])
+    base_output_dir = base_output_dir + '_' + config['networks']['type'] + '-' + config['networks']['params']['m_type']
+    base_output_dir = base_output_dir + '_bs' + str(config['training_opt']['batch_size'])
+    base_output_dir = base_output_dir + '_ep' + str(config['training_opt']['num_epochs'])
+    base_output_dir = base_output_dir + '_lr' + str(config['training_opt']['optim_params']['lr'])
+    base_output_dir = base_output_dir + '_' + config['training_opt']['optimizer']
+    base_output_dir = base_output_dir + '_' + config['training_opt']['scheduler']
+    base_output_dir = base_output_dir + '_seed' + str(config['seed'])
+    if 'method_opt' in config and 'ratio' in config['method_opt']:
+        base_output_dir = base_output_dir + '_r' + str(config['method_opt']['ratio'])
+    if args.notes is not None:
+        base_output_dir = base_output_dir + '_' + args.notes
 
+    for method_name in methods_list:
+        method_output_dir = base_output_dir + '_' + method_name
 
-    # save config file
-    logger.info('=====> Saving config file')
-    with open(os.path.join(args.output_dir, 'config.yaml'), 'w') as f:
-        yaml.dump(config, f, default_flow_style=False)
-    logger.info('=====> Config file saved')
+        method_output_dir = os.path.join(method_output_dir, get_date())
 
-    init_seeds(config["seed"])
-    # logger.info(f'=====> Random seed initialized to {config["seed"]}')
-    logger.info(f'=====> Wandb initialized')
-    run = wandb.init(config=config,project="Efficient Selection")
-    re_nest_configs(run.config)
-    wandb.define_metric('acc', 'max')
-    run.name = config['dataset']['name'] + '_' + config['output_dir'].split('/')[-2]
+        if os.path.exists(os.path.join(method_output_dir, f'wandb_{method_name}')):
+            print(f'Skip {method_name} as output already exists.')
+            continue
 
-    wandb_local_path = wandb.run.dir
-    # save wandb_local_path to wandb_local_path.txt
-    with open(os.path.join(args.output_dir, 'wandb_local_path.txt'), 'w') as f:
-        f.write(wandb_local_path)
-        f.close()
+        config['method'] = method_name
+        config['output_dir'] = method_output_dir
+        os.makedirs(method_output_dir, exist_ok=True)
 
-    config['num_gpus'] = torch.cuda.device_count()
-    logger.info(f'=====> Number of GPUs: {config["num_gpus"]}')
+        # wandb_not_upload
+        if args.wandb_not_upload:
+            os.environ["WANDB_MODE"] = "dryrun"
+        else:
+            os.environ["WANDB_MODE"] = "run"
+        os.environ["WANDB_DIR"] = os.path.join(method_output_dir, f'wandb_{method_name}')
 
-    Method = getattr(methods, config['method'])(config, logger)
-    Method.run()
+        if args.log_file is None:
+            logger = custom_logger(method_output_dir)
+        else:
+            logger = custom_logger(method_output_dir, args.log_file)
 
-    logger.info('========================= End Main =========================')
+        logger.info('========================= Start Main =========================')
 
+        # save config file
+        logger.info('=====> Saving config file')
+        with open(os.path.join(method_output_dir, 'config.yaml'), 'w') as f:
+            yaml.dump(config, f, default_flow_style=False)
+        logger.info('=====> Config file saved')
 
+        init_seeds(config["seed"])
+        logger.info(f'=====> Wandb initialized')
+        run = wandb.init(config=config, project="Efficient Selection")
+        re_nest_configs(run.config)
+        wandb.define_metric('acc', 'max')
+        run.name = config['dataset']['name'] + '_' + config['output_dir'].split('/')[-2]
+
+        wandb_local_path = wandb.run.dir
+        # save wandb_local_path to wandb_local_path.txt
+        with open(os.path.join(method_output_dir, 'wandb_local_path.txt'), 'w') as f:
+            f.write(wandb_local_path)
+            f.close()
+
+        config['num_gpus'] = torch.cuda.device_count()
+        logger.info(f'=====> Number of GPUs: {config["num_gpus"]}')
+
+        Method = getattr(methods, method_name)(config, logger)
+        Method.run()
+
+        wandb.finish()
+
+        logger.info('========================= End Main =========================')
+
+    return
 if __name__ == '__main__':
     main()
