@@ -15,18 +15,24 @@ def get_date():
     return str(now.strftime("20%y_%h_%d_%H_%M_%S"))
 
 def re_nest_configs(config_dict):
+    """Reconstruct nested parameters flattened by wandb.
+
+    Parameters in ``config_dict`` may appear in a flattened form using dots as
+    separators (e.g. ``"model.hidden"``).  This helper converts them back into
+    nested dictionaries in-place so that the rest of the code can access them via
+    standard dictionary lookups.
+    """
+
     flattened_params = [key for key in config_dict.keys() if '.' in key]
     for param in flattened_params:
         value = config_dict._items.pop(param)
-        # value = config_dict[param]
-        # del config_dict[param] 
         param_levels = param.split('.')
         parent = config_dict._items
-        for level in param_levels:
-            if isinstance(parent[level], dict):
-                parent = parent[level]
-            else:
-                parent[level] = value
+        for level in param_levels[:-1]:
+            if level not in parent or not isinstance(parent[level], dict):
+                parent[level] = {}
+            parent = parent[level]
+        parent[param_levels[-1]] = value
 
     if 'sweep_config' in config_dict.keys():
         config_dict._items.pop("sweep_config")
