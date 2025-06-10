@@ -167,7 +167,14 @@ class SelectionMethod(object):
         now = time.time()
         self.logger.wandb_log({'loss': loss.item(), 'epoch': epoch, 'lr': self.optimizer.param_groups[0]['lr'], self.training_opt['loss_type']: loss.item()})
         val_acc = self.test()
-        self.logger.wandb_log({'val_acc': val_acc, 'epoch': epoch, 'total_time': now - self.run_begin_time, 'total_step': self.total_step, 'time_epoch': now - epoch_begin_time, 'best_val_acc': max(self.best_acc, val_acc)})
+        self.logger.wandb_log({
+            'val_acc': val_acc,
+            'epoch': epoch,
+            'total_time': now - self.run_begin_time,
+            'total_step': self.total_step,
+            'time_epoch': now - epoch_begin_time,
+            'best_val_acc': max(self.best_acc, val_acc),
+            'best_train_acc': train_acc})
         # self.logger.info(f'=====> Best val acc: {max(self.best_acc, val_acc):.4f}, Current val acc: {val_acc:.4f}')
         self.logger.info(f'=====> Time: {now - self.run_begin_time:.4f} s, Time this epoch: {now - epoch_begin_time:.4f} s, Total step: {self.total_step}')
             # save model

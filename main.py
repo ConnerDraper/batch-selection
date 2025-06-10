@@ -6,7 +6,7 @@ import torch.nn as nn
 import numpy as np
 import random
 import secrets
-from utils import custom_logger,random_str, get_date, re_nest_configs
+from utils import custom_logger, random_str, get_date, re_nest_configs
 import wandb
 
 import torch.multiprocessing as mp
@@ -24,7 +24,6 @@ def init_seeds(seed):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    
 
 
 def main():
@@ -76,9 +75,9 @@ def main():
         base_output_dir = base_output_dir + '_' + args.notes
 
     for method_name in methods_list:
-        method_output_dir = base_output_dir + '_' + method_name
-
-        method_output_dir = os.path.join(method_output_dir, get_date())
+        # method_output_dir = base_output_dir + '_' + method_name
+        method_output_dir = os.path.join(base_output_dir, method_name)
+        # method_output_dir = os.path.join(method_output_dir, get_date())
 
         if os.path.exists(os.path.join(method_output_dir, f'wandb_{method_name}')):
             print(f'Skip {method_name} as output already exists.')
