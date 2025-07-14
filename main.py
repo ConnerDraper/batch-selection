@@ -13,7 +13,6 @@ import torch.multiprocessing as mp
 import methods
 
 
-
 def init_seeds(seed):
     print('=====> Using fixed random seed: ' + str(seed))
     os.environ['PYTHONHASHSEED'] = str(seed)
@@ -132,4 +131,5 @@ def main():
 
     return
 if __name__ == '__main__':
-    main()
+    #main()
+    pass
