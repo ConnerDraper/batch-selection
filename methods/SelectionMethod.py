@@ -63,7 +63,6 @@ class SelectionMethod(object):
 
         self.need_features = False
 
-        
     def resume(self, resume_path):
         if os.path.isfile(resume_path):
             self.logger.info(("=> loading checkpoint '{}'".format(resume_path)))
@@ -88,7 +87,6 @@ class SelectionMethod(object):
             shutil.copyfile(filename, best_filename)
             self.logger.info(f'Save best checkpoint to {best_filename}')
         
-
     def run(self):
         self.before_run()
         self.run_begin_time = time.time()

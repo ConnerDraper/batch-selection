@@ -4,6 +4,8 @@ methods:
   - DivBS
   - Full
   - Uniform
+  - RhoLoss
+  
 method_opt:
   epoch_selection: False
   iter_selection: True

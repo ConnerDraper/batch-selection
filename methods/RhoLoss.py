@@ -95,32 +95,61 @@ class RhoLoss(SelectionMethod):
     def get_ratio_per_epoch(self, epoch):
         """
         Get the selection ratio for the current epoch.
-        Supports fixed ratio or a list of ratios per epoch.
-
         Args:
             epoch (int): Current epoch number.
-
         Returns:
             float: Selection ratio for the current epoch.
         """
-        if not self.ratio:
+        if epoch < self.warmup_epochs:
+            self.logger.info('warming up')
             return 1.0
-
-        if isinstance(self.ratio, float):
+        if self.ratio_scheduler == 'constant':
             return self.ratio
-        elif isinstance(self.ratio, list):
-            if epoch < len(self.ratio):
-                return self.ratio[epoch]
-            else:
-                return self.ratio[-1]
+        elif self.ratio_scheduler == 'increase_linear':
+            min_ratio = self.ratio[0]
+            max_ratio = self.ratio[1]
+            return min_ratio + (max_ratio - min_ratio) * epoch / self.epochs
+        elif self.ratio_scheduler == 'decrease_linear':
+            min_ratio = self.ratio[0]
+            max_ratio = self.ratio[1]
+            return max_ratio - (max_ratio - min_ratio) * epoch / self.epochs
+        elif self.ratio_scheduler == 'increase_exp':
+            min_ratio = self.ratio[0]
+            max_ratio = self.ratio[1]
+            return min_ratio + (max_ratio - min_ratio) * np.exp(epoch / self.epochs)
+        elif self.ratio_scheduler == 'decrease_exp':
+            min_ratio = self.ratio[0]
+            max_ratio = self.ratio[1]
+            return max_ratio - (max_ratio - min_ratio) * np.exp(epoch / self.epochs)
         else:
-            raise ValueError("ratio should be a float or a list of floats")
+            raise NotImplementedError
     
     def before_batch(self, i, inputs, targets, indexes, epoch):
+        """
+        Hook to be called before processing each batch.
+
+        Args:
+            i (int): Batch index.
+            inputs (torch.Tensor): Input data for the batch.
+            targets (torch.Tensor): Target labels for the batch.
+            indexes (list): Indexes of the data points in the batch.
+            epoch (int): Current epoch number.
+
+        Returns:
+            tuple: (inputs, targets, indexes) after selection.
+        """
+        # get ratio for current epoch
         ratio = self.get_ratio_per_epoch(epoch)
-        if ratio < 1.0:
-            self.logger.info(f"Before batch {i}: applying RhoLoss with ratio {ratio}")
-            selected_indices = self.select(inputs, targets)
-            selected_indices = torch.tensor(selected_indices, device=inputs.device)
-        else:
-            return super().before_batch(i, inputs, targets, indexes, epoch)
+        self.logger.info(f'balance: {self.balance}')
+        self.logger.info('selecting samples for epoch {}, ratio {}'.format(epoch, ratio))
+
+        # select samples based on RHO loss
+        grad_mean, grad = self.calc_grad(inputs, targets, indexes)
+        selected_num_samples = int(inputs.shape[0] * ratio)
+        indices = self.select(grad_mean, grad, selected_num_samples)
+        inputs = inputs[indices]
+        targets = targets[indices]
+        indexes = indexes[indices]
+
+        self.logger.info(f'selected {selected_num_samples}/{inputs.shape[0]} samples from batch {i} in epoch {epoch}')
+        return inputs, targets, indexes
