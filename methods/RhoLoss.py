@@ -143,13 +143,16 @@ class RhoLoss(SelectionMethod):
         self.logger.info(f'balance: {self.balance}')
         self.logger.info('selecting samples for epoch {}, ratio {}'.format(epoch, ratio))
 
-        # select samples based on RHO loss
-        grad_mean, grad = self.calc_grad(inputs, targets, indexes)
-        selected_num_samples = int(inputs.shape[0] * ratio)
-        indices = self.select(grad_mean, grad, selected_num_samples)
-        inputs = inputs[indices]
-        targets = targets[indices]
-        indexes = indexes[indices]
+        if ratio >= 1.0:
+            self.logger.info(f'ratio {ratio} >= 1.0, using all samples')
+            return inputs, targets, indexes
 
-        self.logger.info(f'selected {selected_num_samples}/{inputs.shape[0]} samples from batch {i} in epoch {epoch}')
+        # select samples based on RHO loss
+        num_selected_samples = int(inputs.shape[0] * ratio)
+        selected_indices = self.select(inputs, targets)
+        inputs = inputs[selected_indices]
+        targets = targets[selected_indices]
+        indexes = indexes[selected_indices]
+
+        self.logger.info(f'selected {num_selected_samples}/{inputs.shape[0]} samples from batch {i} in epoch {epoch}')
         return inputs, targets, indexes

@@ -130,6 +130,6 @@ def main():
         logger.info('========================= End Main =========================')
 
     return
+
 if __name__ == '__main__':
-    #main()
-    pass
+    main()

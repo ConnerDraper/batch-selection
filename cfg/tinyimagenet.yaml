@@ -2,7 +2,7 @@ output_dir: null
 seed: 42
 methods:
   - DivBS
-  - Full
+  - RhoLoss
   - Uniform
 method_opt:
   epoch_selection: False
@@ -27,7 +27,7 @@ networks:
     pretrained: False
 
 training_opt:
-  num_epochs: 100
+  num_epochs: 200
   num_steps: 300000000
   num_data_workers: 4
   batch_size: 320
