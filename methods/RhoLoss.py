@@ -1,6 +1,8 @@
 from .SelectionMethod import SelectionMethod
 import torch
 import numpy as np
+import torch
+import torchvision.models as tv_models
 
 class RhoLoss(SelectionMethod):
     """A class for implementing the RhoLoss selection method, which selects samples based on reducible loss.
@@ -42,55 +44,36 @@ class RhoLoss(SelectionMethod):
         self.ILmodel = self._build_model().to(self.device)
 
     def _build_model(self):
-        """Builds a neural network model based on dataset and model type from config.
+        ds = self.config['dataset']['name'].lower()
+        mtype = self.config['networks']['params']['m_type']
+        num_classes = self.config['networks']['params'].get('num_classes')
 
-        Returns:
-            torch.nn.Module: A neural network model for the specified dataset and model type.
+        if ds in ['cifar10', 'cifar100']:
+            num_classes = num_classes or (10 if ds == 'cifar10' else 100)
 
-        Raises:
-            ValueError: If dataset name, model type, or num_classes is missing or invalid.
-        """
-        dataset_config = self.config.get('dataset', {})
-        dataset_name = dataset_config.get('name')
-        num_classes = dataset_config.get('num_classes')
-        
-        networks_config = self.config.get('networks', {}).get('params', {})
-        m_type = networks_config.get('m_type')
+            # Option A: use tv_models (stable)
+            model_fn = getattr(tv_models, mtype, None)
+            if model_fn is None:
+                raise ValueError(f"Model {mtype} not found in torchvision.models")
+            model = model_fn(pretrained=False, num_classes=num_classes)
 
-        # Validate dataset_name (case-insensitive)
-        supported_datasets = {'cifar10': 10, 'cifar100': 100, 'imagenet100': 100, 'imagenet': 1000}
-        if dataset_name is None:
-            self.logger.error("Dataset name not specified in config")
-            raise ValueError("Dataset name is required")
-        
-        # Normalize dataset name to lowercase for comparison
-        dataset_name_lower = dataset_name.lower()
-        if dataset_name_lower not in supported_datasets:
-            self.logger.error(f"Unsupported dataset: {dataset_name}")
-            raise ValueError(f"Dataset must be one of {list(supported_datasets.keys())}")
+            # Optionally adjust conv1 & maxpool for CIFAR
+            if mtype.startswith('resnet'):
+                model.conv1 = torch.nn.Conv2d(3, 64, 3, stride=1, padding=1, bias=False)
+                model.maxpool = torch.nn.Identity()
 
-        # Validate num_classes with fallback for known datasets
-        if num_classes is None:
-            num_classes = supported_datasets[dataset_name_lower]
-            self.logger.info(f"num_classes not specified, using default {num_classes} for {dataset_name}")
-        elif not isinstance(num_classes, int) or num_classes <= 0:
-            self.logger.error(f"Invalid num_classes: {num_classes}")
-            raise ValueError("num_classes must be a positive integer")
-
-        # Validate model type
-        if m_type is None:
-            self.logger.error("Model type not specified in config")
-            raise ValueError("Model type (m_type) must be specified")
-
-        # Build model based on dataset (using normalized name)
-        if dataset_name_lower in ['cifar10', 'cifar100']:
-            from networks.CIFAR import get_model
-            model = get_model(m_type, num_classes=num_classes)
-        elif dataset_name_lower in ['imagenet100', 'imagenet']:
-            from networks.ImageNet import get_model
-            model = get_model(m_type, num_classes=num_classes)
+        elif ds in ['imagenet', 'imagenet100']:
+            # same method but different default num_classes
+            # torchvision models expect 1000 by default
+            model_fn = getattr(tv_models, mtype, None)
+            if model_fn is None:
+                raise ValueError(f"Model {mtype} not found in torchvision.models")
+            model = model_fn(pretrained=False, num_classes=num_classes)
+        else:
+            raise ValueError(f"Unsupported dataset {ds}")
 
         return model
+
 
     def get_ILmodel(self, inputs, targets, path=''):
         """Trains or loads the irreducible loss model (ILmodel).
