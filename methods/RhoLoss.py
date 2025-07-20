@@ -26,7 +26,6 @@ class RhoLoss(SelectionMethod):
         self.ratio = config['method_opt']['ratio']
         self.budget = config['method_opt'].get('budget', 0.1)
         self.epochs = config['method_opt'].get('epochs', 5)
-        self.criterion = torch.nn.CrossEntropyLoss(reduction='none')
         self.ratio_scheduler = config['method_opt'].get('ratio_scheduler', 'constant')
         self.warmup_epochs = config['method_opt'].get('warmup_epochs', 0)
         self.iter_selection = config['method_opt'].get('iter_selection', False)
@@ -112,8 +111,8 @@ class RhoLoss(SelectionMethod):
         for epoch in range(self.il_epochs):
             optimizer.zero_grad()
             outputs = self.ILmodel(inputs)
-            il_loss = self.criterion(outputs, targets).mean()
-            il_loss.backward()
+            loss = self.criterion(outputs, targets).mean()
+            loss.backward()
             optimizer.step()
 
         self.logger.info('Finished training irreducible loss model')
