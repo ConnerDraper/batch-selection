@@ -48,20 +48,47 @@ class RhoLoss(SelectionMethod):
             torch.nn.Module: A neural network model for the specified dataset and model type.
 
         Raises:
-            KeyError: If the dataset name or model type is not supported.
+            ValueError: If dataset name, model type, or num_classes is missing or invalid.
         """
-        dataset_name = self.config['dataset']['name']
-        m_type = self.config['networks']['params']['m_type']
-        num_classes = self.config['dataset']['num_classes']
+        dataset_config = self.config.get('dataset', {})
+        dataset_name = dataset_config.get('name')
+        num_classes = dataset_config.get('num_classes')
+        
+        networks_config = self.config.get('networks', {}).get('params', {})
+        m_type = networks_config.get('m_type')
 
-        if dataset_name in ['cifar10', 'cifar100']:
+        # Validate dataset_name (case-insensitive)
+        supported_datasets = {'cifar10': 10, 'cifar100': 100, 'imagenet100': 100, 'imagenet': 1000}
+        if dataset_name is None:
+            self.logger.error("Dataset name not specified in config")
+            raise ValueError("Dataset name is required")
+        
+        # Normalize dataset name to lowercase for comparison
+        dataset_name_lower = dataset_name.lower()
+        if dataset_name_lower not in supported_datasets:
+            self.logger.error(f"Unsupported dataset: {dataset_name}")
+            raise ValueError(f"Dataset must be one of {list(supported_datasets.keys())}")
+
+        # Validate num_classes with fallback for known datasets
+        if num_classes is None:
+            num_classes = supported_datasets[dataset_name_lower]
+            self.logger.info(f"num_classes not specified, using default {num_classes} for {dataset_name}")
+        elif not isinstance(num_classes, int) or num_classes <= 0:
+            self.logger.error(f"Invalid num_classes: {num_classes}")
+            raise ValueError("num_classes must be a positive integer")
+
+        # Validate model type
+        if m_type is None:
+            self.logger.error("Model type not specified in config")
+            raise ValueError("Model type (m_type) must be specified")
+
+        # Build model based on dataset (using normalized name)
+        if dataset_name_lower in ['cifar10', 'cifar100']:
             from networks.CIFAR import get_model
             model = get_model(m_type, num_classes=num_classes)
-        elif dataset_name in ['imagenet100', 'imagenet']:
+        elif dataset_name_lower in ['imagenet100', 'imagenet']:
             from networks.ImageNet import get_model
             model = get_model(m_type, num_classes=num_classes)
-        else:
-            raise KeyError(f"Unsupported dataset: {dataset_name}")
 
         return model
 
