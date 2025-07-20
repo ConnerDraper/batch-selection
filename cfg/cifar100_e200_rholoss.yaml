@@ -37,3 +37,6 @@ training_opt:
   scheduler_params: {endlr: 0.0001, gamma: 0.1, step_size: 35, milestones: [120, 160]}
 logger_opt:
   print_iter: 100
+
+rho_loss:
+  training_budget: 0.1
