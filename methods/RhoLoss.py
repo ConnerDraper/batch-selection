@@ -40,7 +40,7 @@ class RhoLoss(SelectionMethod):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         # build blank target and IL models
-        self.target_model = self._build_model().to(self.device)
+        # self.target_model = self._build_model().to(self.device)
         self.ILmodel = self._build_model().to(self.device)
 
     def _build_model(self):
@@ -139,7 +139,7 @@ class RhoLoss(SelectionMethod):
             list: Indices of selected samples, sorted by descending reducible loss.
         """
         self.ILmodel.eval()
-        self.target_model.eval()
+        self.model.eval()
 
         inputs = inputs.to(self.device)
         targets = targets.to(self.device)
@@ -147,8 +147,8 @@ class RhoLoss(SelectionMethod):
         with torch.no_grad():
             il_outputs = self.ILmodel(inputs)
             irreducible_loss = self.criterion(il_outputs, targets).cpu().numpy()
-            target_outputs = self.target_model(inputs)
-            total_loss = self.criterion(target_outputs, targets).cpu().numpy()
+            outputs = self.model(inputs)
+            total_loss = self.criterion(outputs, targets).cpu().numpy()
             reducible_loss = total_loss - irreducible_loss
 
         ratio = self.get_ratio_per_epoch(epoch)

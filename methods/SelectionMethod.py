@@ -7,7 +7,7 @@ import torch
 import models
 import data
 
-from methods.method_utils import create_criterion, create_optimizer, create_scheduler
+from .method_utils import *
 
 class SelectionMethod:
     """
