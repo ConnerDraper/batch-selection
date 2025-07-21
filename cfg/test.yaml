@@ -26,10 +26,10 @@ networks:
     num_classes: 10
 
 training_opt:
-  num_epochs: 200
+  num_epochs: 2
   num_steps: 300000
   num_data_workers: 4
-  batch_size: 320
+  batch_size: 8
   test_batch_size: 512
   loss_type: CrossEntropy
   loss_params: {}

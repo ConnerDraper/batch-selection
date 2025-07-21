@@ -2,7 +2,7 @@ from .SelectionMethod import SelectionMethod
 import torch
 import numpy as np
 import torch
-import torchvision.models as tv_models
+import copy
 
 class RhoLoss(SelectionMethod):
     """A class for implementing the RhoLoss selection method, which selects samples based on reducible loss.
@@ -21,154 +21,40 @@ class RhoLoss(SelectionMethod):
                 - 'networks': Dictionary with key 'params' containing 'm_type'.
         logger (logging.Logger): Logger instance for logging training and selection information.
     """
+    method_name = 'RhoLoss'
     def __init__(self, config, logger):
         super().__init__(config, logger)
+        self.balance = config['method_opt']['balance']
         self.ratio = config['method_opt']['ratio']
-        self.budget = config['method_opt'].get('budget', 0.1)
-        self.epochs = config['method_opt'].get('epochs', 5)
-        self.ratio_scheduler = config['method_opt'].get('ratio_scheduler', 'constant')
-        self.warmup_epochs = config['method_opt'].get('warmup_epochs', 0)
-        self.iter_selection = config['method_opt'].get('iter_selection', False)
-        self.balance = config['method_opt'].get('balance', 'none')
+        self.ratio_scheduler = config['method_opt']['ratio_scheduler'] if 'ratio_scheduler' in config['method_opt'] else 'constant'
+        self.warmup_epochs = config['method_opt']['warmup_epochs'] if 'warmup_epochs' in config['method_opt'] else 0
 
-        # rho loss specific parameters
-        self.training_budget = config['rho_loss'].get('training_budget', 0.1)
-        self.il_epochs = max(1, int(self.training_budget * self.epochs))
+        self.current_train_indices = np.arange(self.num_train_samples)
+        self.reduce_dim = config['method_opt']['reduce_dim'] if 'reduce_dim' in config['method_opt'] else False
 
-        # device setup
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-        # build blank target and IL models
-        # self.target_model = self._build_model().to(self.device)
-        self.ILmodel = self._build_model().to(self.device)
-
-    def _build_model(self):
-        ds = self.config['dataset']['name'].lower()
-        mtype = self.config['networks']['params']['m_type']
-        num_classes = self.config['networks']['params'].get('num_classes')
-
-        if ds in ['cifar10', 'cifar100']:
-            num_classes = num_classes or (10 if ds == 'cifar10' else 100)
-
-            # Option A: use tv_models (stable)
-            model_fn = getattr(tv_models, mtype, None)
-            if model_fn is None:
-                raise ValueError(f"Model {mtype} not found in torchvision.models")
-            model = model_fn(pretrained=False, num_classes=num_classes)
-
-            # Optionally adjust conv1 & maxpool for CIFAR
-            if mtype.startswith('resnet'):
-                model.conv1 = torch.nn.Conv2d(3, 64, 3, stride=1, padding=1, bias=False)
-                model.maxpool = torch.nn.Identity()
-
-        elif ds in ['imagenet', 'imagenet100']:
-            # same method but different default num_classes
-            # torchvision models expect 1000 by default
-            model_fn = getattr(tv_models, mtype, None)
-            if model_fn is None:
-                raise ValueError(f"Model {mtype} not found in torchvision.models")
-            model = model_fn(pretrained=False, num_classes=num_classes)
-        else:
-            raise ValueError(f"Unsupported dataset {ds}")
-
-        return model
-
-
-    def get_ILmodel(self, inputs, targets, path=''):
-        """Trains or loads the irreducible loss model (ILmodel).
-
-        If a path is provided, attempts to load a pre-trained ILmodel from the specified path.
-        Otherwise, trains the ILmodel from scratch using the provided inputs and targets.
-
+    def get_holdout_model(self, config, logger):
+        """"Retrieve the holdout model for computing irreducible loss.
         Args:
-            inputs (torch.Tensor): Input data for training the ILmodel.
-            targets (torch.Tensor): Target labels for training the ILmodel.
-            path (str, optional): Path to load/save the ILmodel state dictionary. Defaults to ''.
-
-        Raises:
-            FileNotFoundError: If the specified model path does not exist.
-            Exception: For other errors during model loading.
+            config (dict): Configuration dictionary containing model parameters.
+            logger (logging.Logger): Logger instance for logging information.
         """
-        if path:
-            try:
-                self.logger.info(f'Loading irreducible loss model from {path}')
-                self.ILmodel.load_state_dict(torch.load(path))
-                self.ILmodel.to(self.device)
-                self.logger.info('Loaded irreducible loss model')
-                return
-            except FileNotFoundError:
-                self.logger.info(f'Irreducible loss model not found at {path}')
-            except Exception as e:
-                self.logger.info(f'Failed to load irreducible loss model from {path}, error: {e}')
 
-        self.logger.info(f'Training irreducible loss model from scratch for {self.il_epochs} epochs')
-        optimizer = torch.optim.Adam(self.ILmodel.parameters(), lr=1e-3)
-        self.ILmodel.train()
+        self.holdout_model = copy.deepcopy(self.model)
 
-        inputs = inputs.to(self.device)
-        targets = targets.to(self.device)
+        # if holdout model exists for given config
+        # return self.holdout_model
 
-        for epoch in range(self.il_epochs):
-            optimizer.zero_grad()
-            outputs = self.ILmodel(inputs)
-            loss = self.criterion(outputs, targets).mean()
-            loss.backward()
-            optimizer.step()
+        # if holdout model is not specified, create a new one
 
-        self.logger.info('Finished training irreducible loss model')
-        if path:
-            torch.save(self.ILmodel.state_dict(), path)
-            self.logger.info(f'Saved irreducible loss model to {path}')
-        else:
-            self.logger.info('No path provided, irreducible loss model not saved')
-
-    def select(self, inputs, targets, epoch):
-        """Selects a subset of samples based on reducible loss.
-
-        Computes the reducible loss as the difference between total loss (from target model)
-        and irreducible loss (from ILmodel), then selects the top samples based on the ratio
-        for the current epoch.
-
-        Args:
-            inputs (torch.Tensor): Input data for computing losses.
-            targets (torch.Tensor): Target labels for computing losses.
-            epoch (int): Current training epoch.
-
-        Returns:
-            list: Indices of selected samples, sorted by descending reducible loss.
-        """
-        self.ILmodel.eval()
-        self.model.eval()
-
-        inputs = inputs.to(self.device)
-        targets = targets.to(self.device)
-
-        with torch.no_grad():
-            il_outputs = self.ILmodel(inputs)
-            irreducible_loss = self.criterion(il_outputs, targets).cpu().numpy()
-            outputs = self.model(inputs)
-            total_loss = self.criterion(outputs, targets).cpu().numpy()
-            reducible_loss = total_loss - irreducible_loss
-
-        ratio = self.get_ratio_per_epoch(epoch)
-        n = max(1, int(ratio * len(targets)))
-        selected_indices = np.argsort(-reducible_loss)[:n]
-        return selected_indices.tolist()
+        # raise NotImplementedError("Holdout model retrieval not implemented.")
+        
 
     def get_ratio_per_epoch(self, epoch):
-        """Determines the sample selection ratio for the current epoch.
-
-        Supports multiple ratio scheduling strategies: constant, linear increase/decrease,
-        and exponential increase/decrease.
-
+        """Get the ratio of samples to select for the current epoch based on the configured scheduler.
         Args:
-            epoch (int): Current training epoch.
-
+            epoch (int): Current epoch number.
         Returns:
-            float: The selection ratio for the current epoch.
-
-        Raises:
-            NotImplementedError: If an unsupported ratio scheduler is specified.
+            float: The ratio of samples to select for the current epoch.
         """
         if epoch < self.warmup_epochs:
             self.logger.info('warming up')
@@ -176,57 +62,80 @@ class RhoLoss(SelectionMethod):
         if self.ratio_scheduler == 'constant':
             return self.ratio
         elif self.ratio_scheduler == 'increase_linear':
-            min_ratio, max_ratio = self.ratio
+            min_ratio = self.ratio[0]
+            max_ratio = self.ratio[1]
             return min_ratio + (max_ratio - min_ratio) * epoch / self.epochs
         elif self.ratio_scheduler == 'decrease_linear':
-            min_ratio, max_ratio = self.ratio
+            min_ratio = self.ratio[0]
+            max_ratio = self.ratio[1]
             return max_ratio - (max_ratio - min_ratio) * epoch / self.epochs
         elif self.ratio_scheduler == 'increase_exp':
-            min_ratio, max_ratio = self.ratio
-            progress = epoch / self.epochs
-            scale = (np.exp(progress) - 1) / (np.e - 1)
-            return min_ratio + (max_ratio - min_ratio) * scale
+            min_ratio = self.ratio[0]
+            max_ratio = self.ratio[1]
+            return min_ratio + (max_ratio - min_ratio) * np.exp(epoch / self.epochs)
         elif self.ratio_scheduler == 'decrease_exp':
-            min_ratio, max_ratio = self.ratio
-            progress = epoch / self.epochs
-            scale = (np.exp(progress) - 1) / (np.e - 1)
-            return max_ratio - (max_ratio - min_ratio) * scale
+            min_ratio = self.ratio[0]
+            max_ratio = self.ratio[1]
+            return max_ratio - (max_ratio - min_ratio) * np.exp(epoch / self.epochs)
         else:
-            raise NotImplementedError(f"Unsupported ratio scheduler: {self.ratio_scheduler}")
+            raise NotImplementedError
 
-    def before_batch(self, i, inputs, targets, indexes, epoch):
-        """Selects a subset of samples from a batch for training.
-
-        Adjusts the input batch based on the reducible loss selection criteria and the
-        current epoch's ratio.
-
+    def get_reducible_loss(self, inputs, targets):
+        """Compute the reducible loss for the current model using the holdout model.
         Args:
-            i (int): Batch index.
-            inputs (torch.Tensor): Input data for the batch.
-            targets (torch.Tensor): Target labels for the batch.
-            indexes (np.ndarray or torch.Tensor or list): Indices of samples in the batch.
-            epoch (int): Current training epoch.
-
+            inputs (torch.Tensor): Input data for which to compute the reducible loss.
+            targets (torch.Tensor): Corresponding target labels for the input data.
         Returns:
-            tuple: (inputs, targets, indexes) of the selected samples.
+            torch.Tensor: The computed reducible loss.
         """
-        ratio = self.get_ratio_per_epoch(epoch)
-        self.logger.info(f'selecting samples for epoch {epoch}, ratio {ratio}')
-
-        if type(indexes) not in [np.ndarray, torch.Tensor]:
-            indexes = np.array(indexes)
-
-        if ratio >= 1.0:
-            self.logger.info(f'ratio {ratio} >= 1.0, using all samples')
+        total_loss = self.model(inputs, targets)
+        irreducible_loss = self.holdout_model(inputs, targets)
+        reducible_loss = total_loss - irreducible_loss
+        return reducible_loss
+        
+    def selection(self, inputs, targets):
+        """Select sub-batch with highest reducible loss.
+        Args:
+            inputs (torch.Tensor): Input data for the current batch.
+            targets (torch.Tensor): Corresponding target labels for the current batch.
+        Returns:
+            torch.Tensor: Indices of the selected samples.
+        """
+        reducible_loss = self.get_reducible_loss(inputs, targets)
+        _, indices = torch.topk(reducible_loss, int(self.ratio * inputs.shape[0]))
+        return indices
+    
+    def before_batch(self, i, inputs, targets, indexes, epoch):
+        """Prepare the batch for training by selecting samples based on reducible loss.
+        Args:
+            i (int): Current batch index.
+            inputs (torch.Tensor): Input data for the current batch.
+            targets (torch.Tensor): Corresponding target labels for the current batch.
+            indexes (torch.Tensor): Indices of the samples in the current batch.
+            epoch (int): Current epoch number.
+        Returns:
+            tuple: Selected inputs, targets, and indexes for the current batch.
+        """
+        
+        if self.iter_selection:
+            # Get the ratio for the current epoch
+            ratio = self.get_ratio_per_epoch(epoch)
+            if ratio == 1.0:
+                if i == 0:
+                    self.logger.info('using all samples')
+                return super().before_batch(i, inputs, targets, indexes, epoch)
+            else:
+                if i == 0:
+                    self.logger.info(f'balance: {self.balance}')
+                    self.logger.info('selecting samples for epoch {}, ratio {}'.format(epoch, ratio))
+            
+            # Get indices based on reducible loss
+            selected_num_samples = int(inputs.shape[0] * ratio)
+            indices = self.selection(inputs, targets, selected_num_samples)
+            inputs = inputs[indices]
+            targets = targets[indices]
+            indexes = indexes[indices]
             return inputs, targets, indexes
 
-        sample_size = inputs.shape[0]
-        selected_indices = self.select(inputs, targets, epoch)
-        subsample_size = len(selected_indices)
-
-        inputs = inputs[selected_indices]
-        targets = targets[selected_indices]
-        indexes = indexes[selected_indices]
-
-        self.logger.info(f'selected {subsample_size}/{sample_size} samples from batch {i} in epoch {epoch}')
-        return inputs, targets, indexes
+        else:
+            return super().before_batch(i, inputs, targets, indexes, epoch)
