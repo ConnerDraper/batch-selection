@@ -2,7 +2,6 @@ output_dir: null
 seed: 42
 methods:
   - DivBS
-  - Uniform
   - RhoLoss
   
 method_opt:
@@ -29,7 +28,7 @@ training_opt:
   num_epochs: 2
   num_steps: 300000
   num_data_workers: 4
-  batch_size: 8
+  batch_size: 64
   test_batch_size: 512
   loss_type: CrossEntropy
   loss_params: {}
