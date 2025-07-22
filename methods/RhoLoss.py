@@ -88,11 +88,11 @@ class RhoLoss(SelectionMethod):
         ho_model = getattr(models, model_type)(**model_args).to(self.device).train()
 
         opt = self.config['holdout']['optim_params']
-        crit_params = self.config['holdout']['loss_params']
+        # crit_params = self.config['holdout']['loss_params']
         optimizer = torch.optim.SGD(ho_model.parameters(), lr=opt.get('lr', 0.01),
                                     momentum=opt.get('momentum', 0.9),
                                     weight_decay=opt.get('weight_decay', 5e-4))
-        criterion = torch.nn.CrossEntropyLoss(**crit_params)
+        # criterion = torch.nn.CrossEntropyLoss(**crit_params)
 
         for epoch in range(self.holdout_epochs):
             total_loss = correct = total = 0
@@ -102,7 +102,7 @@ class RhoLoss(SelectionMethod):
 
                 optimizer.zero_grad()
                 outputs = ho_model(inputs)
-                loss = criterion(outputs, targets)
+                loss = self.criterion(outputs, targets)
                 loss.backward()
                 optimizer.step()
 
