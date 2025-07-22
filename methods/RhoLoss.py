@@ -39,6 +39,10 @@ class RhoLoss(SelectionMethod):
         self.holdout_batch_size = config['holdout']['holdout_batch_size'] if 'holdout' in config else 128
         self.holdout_num_workers = config['holdout']['holdout_num_workers'] if 'holdout' in config else 4
         self.holdout_model_path = config['holdout']['holdout_model_path'] if 'holdout' in config else None
+
+        # create element-wise loss criterion for reducible loss calculation
+        self.criterion_vec = torch.nn.CrossEntropyLoss(reduction='none')
+
         
         # Load or train holdout model
         self.split_train_holdout()
@@ -48,7 +52,6 @@ class RhoLoss(SelectionMethod):
         else:
             self.logger.info('No valid holdout model path provided or file does not exist. Training a new holdout model.')
             self.train_holdout_model()
-
 
     def load_holdout_model(self):
         """Load the holdout model from the specified path.
@@ -77,7 +80,6 @@ class RhoLoss(SelectionMethod):
         self.holdout_loader = DataLoader(self.holdout_dset, batch_size=self.batch_size, shuffle=False)
         self.train_loader = DataLoader(self.train_dset, batch_size=self.batch_size, shuffle=False)
         self.logger.info(f'Split training dataset into {len(self.train_dset)} training samples and {len(self.holdout_dset)} holdout samples')
-
 
     def train_holdout_model(self):
         self.logger.info('Training new holdout model')
@@ -150,27 +152,6 @@ class RhoLoss(SelectionMethod):
         else:
             raise NotImplementedError
 
-    def get_reducible_loss(self, inputs, targets):
-        """Compute the reducible loss for the current model using the holdout model.
-        Args:
-            inputs (torch.Tensor): Input data for which to compute the reducible loss.
-            targets (torch.Tensor): Corresponding target labels for the input data.
-        Returns:
-            torch.Tensor: The computed reducible loss.
-        """
-        with torch.no_grad():
-            logits_main = self.model(inputs)
-            total_loss = self.criterion(logits_main, targets)
-
-            logits_holdout = self.holdout_model(inputs)
-            irreducible_loss = self.criterion(logits_holdout, targets)
-
-        reducible_loss = total_loss - irreducible_loss
-        self.logger.debug(
-            f"Reducible loss stats: mean={reducible_loss.mean():.4f}, max={reducible_loss.max():.4f}, min={reducible_loss.min():.4f}"
-        )
-        return reducible_loss
-
     def selection(self, inputs, targets, selected_num_samples):
         """Select sub-batch with highest reducible loss.
         Args:
@@ -179,7 +160,13 @@ class RhoLoss(SelectionMethod):
         Returns:
             torch.Tensor: Indices of the selected samples.
         """
-        reducible_loss = self.get_reducible_loss(inputs, targets)
+        with torch.no_grad():
+            logits_main = self.model(inputs)
+            total_loss = self.criterion_vec(logits_main, targets)
+            logits_holdout = self.holdout_model(inputs)
+            irreducible_loss = self.criterion_vec(logits_holdout, targets)
+            reducible_loss = total_loss - irreducible_loss
+            self.logger.debug(f"Reducible loss stats: mean={reducible_loss.mean():.4f}, max={reducible_loss.max():.4f}, min={reducible_loss.min():.4f}")
         _, indices = torch.topk(reducible_loss, selected_num_samples)
         return indices
     
