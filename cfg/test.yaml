@@ -40,8 +40,6 @@ logger_opt:
 
 holdout:
   holdout_ratio: 0.1
-  holdout_epochs: 10
-  holdout_batch_size: 128
   holdout_num_workers: 4
   holdout_model: True
   holdout_model_path: null

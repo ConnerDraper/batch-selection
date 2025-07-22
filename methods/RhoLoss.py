@@ -35,8 +35,7 @@ class RhoLoss(SelectionMethod):
 
         # holdout model parameters
         self.holdout_ratio = config['holdout']['holdout_ratio'] if 'holdout' in config else 0.1
-        self.holdout_epochs = config['holdout']['holdout_epochs'] if 'holdout' in config else 10
-        self.holdout_batch_size = config['holdout']['holdout_batch_size'] if 'holdout' in config else 128
+        self.holdout_epochs = max(1, int(self.ratio * self.epochs))
         self.holdout_num_workers = config['holdout']['holdout_num_workers'] if 'holdout' in config else 4
         self.holdout_model_path = config['holdout']['holdout_model_path'] if 'holdout' in config else None
 
