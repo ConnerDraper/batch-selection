@@ -25,7 +25,7 @@ networks:
     num_classes: 10
 
 training_opt:
-  num_epochs: 2
+  num_epochs: 1
   num_steps: 300000
   num_data_workers: 4
   batch_size: 64
@@ -38,3 +38,17 @@ training_opt:
   scheduler_params: {endlr: 0.0001, gamma: 0.1, step_size: 35, milestones: [120, 160]}
 logger_opt:
   print_iter: 100
+
+holdout:
+  holdout_ratio: 0.1
+  holdout_epochs: 10
+  holdout_batch_size: 128
+  holdout_num_workers: 4
+  holdout_model: True
+  holdout_model_path: null
+  optim_params:
+    lr: 0.01
+    momentum: 0.9
+    weight_decay: 0.0005
+  loss_params:
+    reduction: 'none'

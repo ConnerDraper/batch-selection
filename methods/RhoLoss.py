@@ -1,8 +1,9 @@
 from .SelectionMethod import SelectionMethod
+import models
 import torch
 import numpy as np
-import torch
-import copy
+from torch.utils.data import random_split, DataLoader
+from os import path
 
 class RhoLoss(SelectionMethod):
     """A class for implementing the RhoLoss selection method, which selects samples based on reducible loss.
@@ -32,22 +33,108 @@ class RhoLoss(SelectionMethod):
         self.current_train_indices = np.arange(self.num_train_samples)
         self.reduce_dim = config['method_opt']['reduce_dim'] if 'reduce_dim' in config['method_opt'] else False
 
-    def get_holdout_model(self, config, logger):
-        """"Retrieve the holdout model for computing irreducible loss.
+        # holdout model parameters
+        self.holdout_ratio = config['holdout']['holdout_ratio'] if 'holdout' in config else 0.1
+        self.holdout_epochs = config['holdout']['holdout_epochs'] if 'holdout' in config else 10
+        self.holdout_batch_size = config['holdout']['holdout_batch_size'] if 'holdout' in config else 128
+        self.holdout_num_workers = config['holdout']['holdout_num_workers'] if 'holdout' in config else 4
+        self.holdout_model_path = config['holdout']['holdout_model_path'] if 'holdout' in config else None
+
+        # split train/holdout datasets and get holdout model
+        self.split_train_holdout()
+        try:
+            self.load_holdout_model()
+        except FileNotFoundError:
+            self.logger.info('Holdout model not found, training a new one.')
+            self.holdout_model = None
+            self.iter_selection = config['method_opt']['iter_selection'] if 'iter_selection' in config['method_opt'] else True
+            if self.iter_selection:
+                self.fit_holdout_model()
+        else:
+            self.fit_holdout_model()
+
+    def load_holdout_model(self):
+        """Load the holdout model from the specified path.
         Args:
-            config (dict): Configuration dictionary containing model parameters.
-            logger (logging.Logger): Logger instance for logging information.
+            model_path (str): Path to the holdout model file.
+        Returns:
+            torch.nn.Module: The loaded holdout model.
         """
+        self.logger.info(f'Loading holdout model from {self.holdout_model_path}')
+        holdout_model = torch.load(self.holdout_model_path)
+        holdout_model.eval()
+        self.holdout_model = holdout_model
 
-        self.holdout_model = copy.deepcopy(self.model)
+    def split_train_holdout(self):
+        """Split the training dataset into training and holdout subsets using ratio."""
+        total_len = len(self.train_dset)
+        holdout_ratio = self.holdout_ratio
+        train_ratio = 1.0 - holdout_ratio
 
-        # if holdout model exists for given config
-        # return self.holdout_model
+        self.train_dset, self.holdout_dset = random_split(
+            self.train_dset,
+            [train_ratio, holdout_ratio],
+            generator=torch.Generator().manual_seed(self.seed)
+        )
 
-        # if holdout model is not specified, create a new one
+        self.holdout_loader = DataLoader(self.holdout_dset, batch_size=self.batch_size, shuffle=False)
+        self.train_loader = DataLoader(self.train_dset, batch_size=self.batch_size, shuffle=False)
+        self.logger.info(f'Split training dataset into {len(self.train_dset)} training samples and {len(self.holdout_dset)} holdout samples')
 
-        # raise NotImplementedError("Holdout model retrieval not implemented.")
-        
+    def fit_holdout_model(self):
+        """Train the holdout model for computing irreducible loss."""
+        self.logger.info('Training holdout model for irreducible loss computation')
+
+        # Initialize a fresh model from config
+        model_type = self.config['networks']['type']
+        model_args = self.config['networks']['params']
+        holdout_model = getattr(models, model_type)(**model_args).to(self.device)
+        holdout_model.train()
+
+        # Load optimizer and criterion settings from holdout config
+        holdout_optim_params = self.config['holdout']['optim_params']
+        holdout_loss_params = self.config['holdout']['loss_params']
+
+        optimizer = torch.optim.SGD(
+            holdout_model.parameters(),
+            lr=holdout_optim_params.get('lr', 0.01),
+            momentum=holdout_optim_params.get('momentum', 0.9),
+            weight_decay=holdout_optim_params.get('weight_decay', 5e-4)
+        )
+        criterion = torch.nn.CrossEntropyLoss(**holdout_loss_params)
+
+        for epoch in range(self.holdout_epochs):
+            holdout_model.train()
+            total_loss = 0.0
+            total_correct = 0
+            total_samples = 0
+
+            for inputs, targets in self.holdout_loader:
+                inputs, targets = inputs.to(self.device), targets.to(self.device)
+
+                optimizer.zero_grad()
+                outputs = holdout_model(inputs)
+                loss = criterion(outputs, targets)
+                loss.backward()
+                optimizer.step()
+
+                total_loss += loss.item() * inputs.size(0)
+                total_correct += (outputs.argmax(dim=1) == targets).sum().item()
+                total_samples += inputs.size(0)
+
+            avg_loss = total_loss / total_samples
+            accuracy = 100.0 * total_correct / total_samples
+            self.logger.info(f"[Holdout Epoch {epoch+1}/{self.holdout_epochs}] Loss: {avg_loss:.4f} | Acc: {accuracy:.2f}%")
+
+        self.holdout_model = holdout_model.eval()
+
+        # The IL model should generalize. It is trained briefly and then frozen.
+
+        # Optionally save the trained holdout model
+        if self.holdout_model_path:
+            torch.save(self.holdout_model, self.holdout_model_path)
+            self.logger.info(f"Holdout model saved to {self.holdout_model_path}")
+
 
     def get_ratio_per_epoch(self, epoch):
         """Get the ratio of samples to select for the current epoch based on the configured scheduler.
@@ -88,12 +175,20 @@ class RhoLoss(SelectionMethod):
         Returns:
             torch.Tensor: The computed reducible loss.
         """
-        total_loss = self.model(inputs, targets)
-        irreducible_loss = self.holdout_model(inputs, targets)
+        with torch.no_grad():
+            logits_main = self.model(inputs)
+            total_loss = self.criterion(logits_main, targets)
+
+            logits_holdout = self.holdout_model(inputs)
+            irreducible_loss = self.criterion(logits_holdout, targets)
+
         reducible_loss = total_loss - irreducible_loss
+        self.logger.debug(
+            f"Reducible loss stats: mean={reducible_loss.mean():.4f}, max={reducible_loss.max():.4f}, min={reducible_loss.min():.4f}"
+        )
         return reducible_loss
-        
-    def selection(self, inputs, targets):
+
+    def selection(self, inputs, targets, selected_num_samples):
         """Select sub-batch with highest reducible loss.
         Args:
             inputs (torch.Tensor): Input data for the current batch.
@@ -102,7 +197,7 @@ class RhoLoss(SelectionMethod):
             torch.Tensor: Indices of the selected samples.
         """
         reducible_loss = self.get_reducible_loss(inputs, targets)
-        _, indices = torch.topk(reducible_loss, int(self.ratio * inputs.shape[0]))
+        _, indices = torch.topk(reducible_loss, selected_num_samples)
         return indices
     
     def before_batch(self, i, inputs, targets, indexes, epoch):
@@ -125,13 +220,16 @@ class RhoLoss(SelectionMethod):
                     self.logger.info('using all samples')
                 return super().before_batch(i, inputs, targets, indexes, epoch)
             else:
-                if i == 0:
+                if i % 50 == 0:
                     self.logger.info(f'balance: {self.balance}')
                     self.logger.info('selecting samples for epoch {}, ratio {}'.format(epoch, ratio))
             
             # Get indices based on reducible loss
-            selected_num_samples = int(inputs.shape[0] * ratio)
+            selected_num_samples = round(inputs.shape[0] * ratio)
+            selected_num_samples = max(1, min(selected_num_samples, inputs.shape[0]))
             indices = self.selection(inputs, targets, selected_num_samples)
+            self.logger.debug(f"Selected {len(indices)} samples out of {inputs.shape[0]} for batch {i}")
+
             inputs = inputs[indices]
             targets = targets[indices]
             indexes = indexes[indices]

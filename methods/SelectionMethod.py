@@ -22,6 +22,9 @@ class SelectionMethod(object):
         self.start_epoch = 0
         self.best_acc = 0
         self.best_epoch = 0
+        self.seed = config['seed'] 
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.iter_selection = config['method_opt']['iter_selection'] if 'iter_selection' in config['method_opt'] else True
         # gpu
         self.num_gpus = config['num_gpus']
         if self.num_gpus == 0:
@@ -56,8 +59,7 @@ class SelectionMethod(object):
         if self.epochs is None and self.num_steps is None:
             raise ValueError('Must specify either num_epochs or num_steps in training_opt')
         self.num_data_workers = config['training_opt']['num_data_workers']
-        self.batch_size = config['training_opt']['batch_size']
-        
+        self.batch_size = config['training_opt']['batch_size'] if 'batch_size' in config['training_opt'] else 320
         
         self.criterion = create_criterion(config, logger)
 
