@@ -81,6 +81,9 @@ class RhoLoss(SelectionMethod):
             num_workers=self.holdout_num_workers, pin_memory=True
         )
 
+        self.num_train_samples = len(self.train_dset)
+        self.num_holdout_samples = len(self.holdout_dset)
+        self.num_test_samples = len(self.test_dset)
         self.logger.info(f'Split training dataset into {len(self.train_dset)} training samples and {len(self.holdout_dset)} holdout samples')
 
     def train_holdout_model(self):
