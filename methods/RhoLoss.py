@@ -2,7 +2,7 @@ from .SelectionMethod import SelectionMethod
 import models
 import torch
 import numpy as np
-from torch.utils.data import random_split, DataLoader
+from torch.utils.data import random_split, DataLoader, BatchSampler
 from os import path
 
 class RhoLoss(SelectionMethod):
@@ -65,19 +65,22 @@ class RhoLoss(SelectionMethod):
         self.holdout_model = holdout_model
 
     def split_train_holdout(self):
-        """Split the training dataset into training and holdout subsets using ratio."""
         total_len = len(self.train_dset)
-        holdout_ratio = self.holdout_ratio
-        train_ratio = 1.0 - holdout_ratio
+        holdout_len = int(total_len * self.holdout_ratio)
+        train_len = total_len - holdout_len
 
         self.train_dset, self.holdout_dset = random_split(
             self.train_dset,
-            [train_ratio, holdout_ratio],
+            [train_len, holdout_len],
             generator=torch.Generator().manual_seed(self.seed)
         )
 
-        self.holdout_loader = DataLoader(self.holdout_dset, batch_size=self.batch_size, shuffle=False)
-        self.train_loader = DataLoader(self.train_dset, batch_size=self.batch_size, shuffle=False)
+        holdout_sampler = BatchSampler(torch.arange(len(self.holdout_dset)), batch_size=self.batch_size, drop_last=False)
+        self.holdout_loader = DataLoader(
+            self.holdout_dset, batch_sampler=holdout_sampler,
+            num_workers=self.holdout_num_workers, pin_memory=True
+        )
+
         self.logger.info(f'Split training dataset into {len(self.train_dset)} training samples and {len(self.holdout_dset)} holdout samples')
 
     def train_holdout_model(self):
@@ -119,7 +122,6 @@ class RhoLoss(SelectionMethod):
             torch.save(self.holdout_model, self.holdout_model_path)
             self.logger.info(f"Saved holdout model to {self.holdout_model_path}")
 
-
     def get_ratio_per_epoch(self, epoch):
         """Get the ratio of samples to select for the current epoch based on the configured scheduler.
         Args:
@@ -159,6 +161,7 @@ class RhoLoss(SelectionMethod):
         Returns:
             torch.Tensor: Indices of the selected samples.
         """
+        self.holdout_model.eval()
         with torch.no_grad():
             logits_main = self.model(inputs)
             total_loss = self.criterion_vec(logits_main, targets)
