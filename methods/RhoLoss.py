@@ -106,7 +106,9 @@ class RhoLoss(SelectionMethod):
             total_correct = 0
             total_samples = 0
 
-            for inputs, targets in self.holdout_loader:
+            for batch in self.holdout_loader:
+                if epoch == 1: print(batch)
+                inputs, targets = batch[0], batch[1]
                 inputs, targets = inputs.to(self.device), targets.to(self.device)
 
                 optimizer.zero_grad()
