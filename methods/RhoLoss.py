@@ -47,7 +47,7 @@ class RhoLoss(SelectionMethod):
             self.load_holdout_model()
         else:
             self.logger.info('No valid holdout model path provided or file does not exist. Training a new holdout model.')
-            self.get_holdout_model()
+            self.train_holdout_model()
 
 
     def load_holdout_model(self):
@@ -78,61 +78,45 @@ class RhoLoss(SelectionMethod):
         self.train_loader = DataLoader(self.train_dset, batch_size=self.batch_size, shuffle=False)
         self.logger.info(f'Split training dataset into {len(self.train_dset)} training samples and {len(self.holdout_dset)} holdout samples')
 
-    def get_holdout_model(self):
-        """Train the holdout model for computing irreducible loss."""
-        self.logger.info('Training holdout model for irreducible loss computation')
 
-        # Initialize a fresh model from config
+    def train_holdout_model(self):
+        self.logger.info('Training new holdout model')
         model_type = self.config['networks']['type']
         model_args = self.config['networks']['params']
-        holdout_model = getattr(models, model_type)(**model_args).to(self.device)
-        holdout_model.train()
+        ho_model = getattr(models, model_type)(**model_args).to(self.device).train()
 
-        # Load optimizer and criterion settings from holdout config
-        holdout_optim_params = self.config['holdout']['optim_params']
-        holdout_loss_params = self.config['holdout']['loss_params']
-
-        optimizer = torch.optim.SGD(
-            holdout_model.parameters(),
-            lr=holdout_optim_params.get('lr', 0.01),
-            momentum=holdout_optim_params.get('momentum', 0.9),
-            weight_decay=holdout_optim_params.get('weight_decay', 5e-4)
-        )
-        criterion = torch.nn.CrossEntropyLoss(**holdout_loss_params)
+        opt = self.config['holdout']['optim_params']
+        crit_params = self.config['holdout']['loss_params']
+        optimizer = torch.optim.SGD(ho_model.parameters(), lr=opt.get('lr', 0.01),
+                                    momentum=opt.get('momentum', 0.9),
+                                    weight_decay=opt.get('weight_decay', 5e-4))
+        criterion = torch.nn.CrossEntropyLoss(**crit_params)
 
         for epoch in range(self.holdout_epochs):
-            holdout_model.train()
-            total_loss = 0.0
-            total_correct = 0
-            total_samples = 0
-
+            total_loss = correct = total = 0
             for batch in self.holdout_loader:
-                if epoch == 0: print(batch)
-                inputs, targets = batch[0], batch[1]
-                inputs, targets = inputs.to(self.device), targets.to(self.device)
+                inputs = batch['input'].to(self.device)
+                targets = batch['target'].to(self.device)
 
                 optimizer.zero_grad()
-                outputs = holdout_model(inputs)
+                outputs = ho_model(inputs)
                 loss = criterion(outputs, targets)
                 loss.backward()
                 optimizer.step()
 
                 total_loss += loss.item() * inputs.size(0)
-                total_correct += (outputs.argmax(dim=1) == targets).sum().item()
-                total_samples += inputs.size(0)
+                correct += (outputs.argmax(dim=1) == targets).sum().item()
+                total += inputs.size(0)
 
-            avg_loss = total_loss / total_samples
-            accuracy = 100.0 * total_correct / total_samples
-            self.logger.info(f"[Holdout Epoch {epoch+1}/{self.holdout_epochs}] Loss: {avg_loss:.4f} | Acc: {accuracy:.2f}%")
+            avg = total_loss / total
+            acc = 100 * correct / total
+            self.logger.info(f"[Holdout Epoch {epoch+1}/{self.holdout_epochs}] "
+                             f"Loss: {avg:.4f}, Acc: {acc:.2f}%")
 
-        self.holdout_model = holdout_model.eval()
-
-        # The IL model should generalize. It is trained briefly and then frozen.
-
-        # Optionally save the trained holdout model
+        self.holdout_model = ho_model.eval()
         if self.holdout_model_path:
             torch.save(self.holdout_model, self.holdout_model_path)
-            self.logger.info(f"Holdout model saved to {self.holdout_model_path}")
+            self.logger.info(f"Saved holdout model to {self.holdout_model_path}")
 
 
     def get_ratio_per_epoch(self, epoch):
