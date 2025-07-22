@@ -39,19 +39,16 @@ class RhoLoss(SelectionMethod):
         self.holdout_batch_size = config['holdout']['holdout_batch_size'] if 'holdout' in config else 128
         self.holdout_num_workers = config['holdout']['holdout_num_workers'] if 'holdout' in config else 4
         self.holdout_model_path = config['holdout']['holdout_model_path'] if 'holdout' in config else None
-
-        # split train/holdout datasets and get holdout model
+        
+        # Load or train holdout model
         self.split_train_holdout()
-        try:
+        if self.holdout_model_path and path.exists(self.holdout_model_path):
+            self.logger.info(f'Loading holdout model from {self.holdout_model_path}')
             self.load_holdout_model()
-        except FileNotFoundError:
-            self.logger.info('Holdout model not found, training a new one.')
-            self.holdout_model = None
-            self.iter_selection = config['method_opt']['iter_selection'] if 'iter_selection' in config['method_opt'] else True
-            if self.iter_selection:
-                self.fit_holdout_model()
         else:
-            self.fit_holdout_model()
+            self.logger.info('No valid holdout model path provided or file does not exist. Training a new holdout model.')
+            self.get_holdout_model()
+
 
     def load_holdout_model(self):
         """Load the holdout model from the specified path.
@@ -81,7 +78,7 @@ class RhoLoss(SelectionMethod):
         self.train_loader = DataLoader(self.train_dset, batch_size=self.batch_size, shuffle=False)
         self.logger.info(f'Split training dataset into {len(self.train_dset)} training samples and {len(self.holdout_dset)} holdout samples')
 
-    def fit_holdout_model(self):
+    def get_holdout_model(self):
         """Train the holdout model for computing irreducible loss."""
         self.logger.info('Training holdout model for irreducible loss computation')
 
