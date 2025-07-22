@@ -1,7 +1,6 @@
 output_dir: null
 seed: 42
 methods:
-  - DivBS
   - RhoLoss
   
 method_opt:
